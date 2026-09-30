@@ -2,6 +2,13 @@
 
 零依赖的 Node.js 命令行/图形界面工具：粘贴抖音分享文本或链接，直接下载**无水印**视频或图集原图。
 
+## 下载安装（免构建）
+
+**[v1.1.0 Releases](https://github.com/yuanyuandada/douyin-dl/releases/latest)**：
+
+- Windows：[douyin-dl-setup-1.1.0.exe](https://github.com/yuanyuandada/douyin-dl/releases/download/v1.1.0/douyin-dl-setup-1.1.0.exe)（安装包，SmartScreen 首次提示请点"仍要运行"）
+- Android 10+：[douyin-dl-1.1.0.apk](https://github.com/yuanyuandada/douyin-dl/releases/download/v1.1.0/douyin-dl-1.1.0.apk)（侧载安装，保存到 手机下载/douyin-dl/）
+
 ## 图形界面（推荐）
 
 直接**双击 `dist/douyin-dl.exe`**（或不带参数运行）：
