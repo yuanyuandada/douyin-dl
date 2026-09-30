@@ -68,6 +68,16 @@ douyin-dl <链接>
 - 界面下载按 2 路并发排队执行，降低触发风控的概率；遇到风控时分享页可能返回空数据，稍后重试即可。
 - 本机若存在 HTTPS 中间人（代理/安全软件注入证书），工具会提示并自动跳过证书校验。
 
+## 安卓版
+
+`android/` 目录是无 Gradle 的轻量安卓工程：原生 WebView 壳 + JSBridge（原生代发 HTTP 绕过跨域、媒体经 MediaStore 写入系统"下载/douyin-dl/"目录），页面与签名算法和桌面版同一套。要求 Android 10+。
+
+```bash
+cd android && bash build.sh   # 产物: android/douyin-dl-1.1.0.apk（需 JDK17 + Android SDK 34）
+```
+
+安装：把 APK 传到手机点开安装（需允许"安装未知应用"）；签名密钥为 `android/debug.keystore`（密码 android）。
+
 ## 打包为 EXE / 安装包
 
 基于 Node 官方 SEA（Single Executable Application）方案，产出免安装的单文件程序：
