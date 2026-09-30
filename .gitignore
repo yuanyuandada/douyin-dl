@@ -4,3 +4,6 @@ sea-config.json
 downloads/
 *.part
 installer-test/
+android/build/
+android/cmdtools.zip
+android/douyin-dl-*.apk

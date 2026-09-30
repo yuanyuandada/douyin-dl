@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>douyin-dl 抖音去水印下载</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#101014;color:#ececf1;font:15px/1.6 system-ui,'Segoe UI','Microsoft YaHei',sans-serif;margin:0;padding:16px 14px 40px;max-width:640px;margin:0 auto}
+header{display:flex;align-items:baseline;gap:8px;margin-bottom:14px}
+h1{font-size:20px;margin:0;color:#fe2c55}
+.sub{color:#888;font-size:12px}
+textarea{width:100%;background:#1a1a20;border:1px solid #2c2c34;border-radius:10px;color:#eee;padding:12px;font:inherit;resize:vertical}
+textarea:focus{outline:none;border-color:#fe2c55}
+.row{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:center}
+label{color:#aaa;font-size:13px;display:flex;align-items:center;gap:6px}
+button{background:#fe2c55;color:#fff;border:0;border-radius:8px;padding:10px 22px;font:inherit;font-weight:600;cursor:pointer}
+button:active{transform:scale(.98)}
+button:disabled{opacity:.5}
+.err{color:#ff6b6b;font-size:13px;margin-top:8px;min-height:1.2em}
+.job{background:#17171d;border:1px solid #26262e;border-radius:12px;padding:12px 14px;margin-top:10px}
+.jt{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.jt b{font-size:14px}
+.tag{background:#2a2a33;color:#aaa;font-size:12px;border-radius:6px;padding:1px 8px}
+.st{font-size:12px;font-weight:600;color:#888}
+.st-done .st{color:#2fbf71}
+.st-error .st{color:#ff6b6b}
+.st-downloading .st,.st-resolving .st,.st-queued .st{color:#fe2c55}
+.jd{color:#bbb;font-size:13px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{height:6px;background:#26262e;border-radius:3px;margin-top:8px;overflow:hidden}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,#fe2c55,#ff7a45);transition:width .3s}
+small{color:#888;font-size:12px;display:block;margin-top:4px}
+.je{color:#ff6b6b;font-size:13px;margin-top:4px;word-break:break-all}
+.jw{color:#e6a23c;font-size:12px;margin-top:4px;word-break:break-all}
+.disclaimer{color:#666;font-size:11px;margin-top:26px;text-align:center;line-height:1.8}
+</style></head><body>
+<header><h1>douyin-dl</h1><span class="sub">抖音视频 / 图集 去水印下载</span></header>
+<main>
+  <textarea id="text" rows="4" placeholder="粘贴分享文案或链接，例如：&#10;8.63 复制打开抖音... https://v.douyin.com/iAbCdEf/ ...&#10;也可以在抖音里点“分享→复制链接”后直接从其他 App 分享过来"></textarea>
+  <div class="row">
+    <label><input id="music" type="checkbox"> 图集同时下载音乐</label>
+    <span style="color:#666;font-size:12px">保存到 手机下载/douyin-dl/</span>
+  </div>
+  <div class="row">
+    <button id="go">开始下载</button>
+  </div>
+  <div id="err" class="err"></div>
+  <div id="jobs"></div>
+</main>
+<footer class="disclaimer">本工具仅供学习与技术研究使用；请尊重视频原作者的著作权。<br>用户使用本工具进行的一切操作及产生的后果与作者无关。</footer>
+<script src="sm3.js"></script>
+<script src="utils.js"></script>
+<script>
+try { programVersion = 'release'; } catch (e) {} // 关闭签名实现的调试输出
+'use strict';
+function $(id){return document.getElementById(id)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function fmtMB(n){n=Number(n)||0;return n>=1048576?(n/1048576).toFixed(1)+'MB':(n/1024).toFixed(0)+'KB'}
+
+var MOBILE_UA='Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+var PAGE_UA=navigator.userAgent; // 与原生请求头一致，签名依赖它
+
+/* ---------- 桥接 ---------- */
+function http(url, headers){
+  var raw=Native.http(url, JSON.stringify(headers||{}));
+  var r=JSON.parse(raw);
+  if(!r || !r.status) throw new Error(r && r.error || '网络错误');
+  return r;
+}
+var ttwidCache=null;
+function ttwid(){ if(ttwidCache===null) ttwidCache=Native.ttwid()||''; return ttwidCache; }
+function fakeMsToken(){var c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';var s='';for(var i=0;i<116;i++)s+=c[(Math.random()*c.length)|0];return s}
+
+/* 下载任务：原生异步回调 __dlProgress / __dlDone */
+var dlWaiters={};
+window.__dlProgress=function(id,done,total){
+  var w=dlWaiters[id]; if(w) w.onProgress(done,total);
+};
+window.__dlDone=function(id,res){
+  var w=dlWaiters[id]; delete dlWaiters[id]; if(w) w.done(res);
+};
+function download(url,headers,fileName,onProgress){
+  return new Promise(function(resolve){
+    var id=JSON.parse(Native.downloadStart(url, JSON.stringify(headers||{}), fileName)).id;
+    dlWaiters[id]={done:resolve,onProgress:onProgress||function(){}};
+  });
+}
+
+/* ---------- 解析（与桌面版 douyin.mjs 同一套规则） ---------- */
+var URL_HOST_RE=/^https?:\/\/([a-z0-9-]+\.)*(douyin\.com|iesdouyin\.com)\/\S+/i;
+function extractUrls(text){
+  var out=[],re=/https?:\/\/[^\s"'，。、《》【】（）()]+/gi,m;
+  while((m=re.exec(text))){
+    var u=m[0].replace(/[),.!]+$/,'');
+    if(URL_HOST_RE.test(u)&&out.indexOf(u)<0)out.push(u);
+  }
+  return out;
+}
+var KIND_ID_RE=/(?:\/share\/)?\/?(video|note|slides)\/(\d{6,})/i;
+function parseKindAndId(url){
+  var mm=url.match(/modal_id=(\d{6,})/); if(mm)return{kind:'video',id:mm[1]};
+  var m=url.match(KIND_ID_RE); if(m)return{kind:m[1].toLowerCase(),id:m[2]};
+  return null;
+}
+async function resolveShare(url){
+  var d=parseKindAndId(url); if(d)return d;
+  var r=await http(url,{'User-Agent':MOBILE_UA});
+  var p=parseKindAndId(r.finalUrl||'');
+  if(!p) throw new Error('短链已失效或无法解析（跳转到了 '+(r.finalUrl||'未知页面')+'）');
+  return p;
+}
+function extractRouterData(html){
+  var idx=html.indexOf('_ROUTER_DATA'); if(idx<0)return null;
+  var start=html.indexOf('{',idx); if(start<0)return null;
+  var depth=0,inStr=false,escp=false;
+  for(var i=start;i<html.length;i++){var ch=html[i];
+    if(inStr){ if(escp)escp=false; else if(ch==='\\')escp=true; else if(ch==='"')inStr=false; }
+    else if(ch==='"')inStr=true;
+    else if(ch==='{')depth++;
+    else if(ch==='}'){depth--;if(depth===0){try{return JSON.parse(html.slice(start,i+1))}catch(e){return null}}}
+  }
+  return null;
+}
+function deepFindItemList(o){
+  if(!o||typeof o!=='object')return null;
+  if(Array.isArray(o.item_list)&&o.item_list.length)return o.item_list;
+  for(var k in o){var f=deepFindItemList(o[k]);if(f)return f;}
+  return null;
+}
+function urlList(v){return Array.isArray(v)?v.filter(Boolean):[]}
+function normalizeItem(item,fallbackId){
+  var video=item.video||{},play=video.play_addr||{},uri=play.uri||video.uri||'';
+  var candidates=[];function push(u){if(u&&candidates.indexOf(u)<0)candidates.push(u)}
+  function playUrl(ratio,line){return uri?('https://www.iesdouyin.com/aweme/v1/play/?video_id='+uri+'&ratio='+ratio+'&line='+line):null}
+  var direct=urlList(play.url_list).filter(function(u){return !/playwm/.test(u)});
+  direct.forEach(function(u){if(/douyinvod|aweme-eagle/.test(u))push(u)});
+  ['1080p','default','720p'].forEach(function(r){push(playUrl(r,0))});
+  direct.forEach(function(u){if(!/douyinvod|aweme-eagle/.test(u))push(u)});
+  urlList(play.url_list).forEach(function(u){if(/playwm/.test(u))push(u.replace('playwm','play'))});
+  (Array.isArray(video.bit_rate)?video.bit_rate:[]).forEach(function(br){urlList(br.play_addr&&br.play_addr.url_list).forEach(function(u){if(!/playwm/.test(u))push(u)})});
+  ['play_addr_lowbr','play_addr_h264'].forEach(function(k){urlList(video[k]&&video[k].url_list).forEach(function(u){if(!/playwm/.test(u))push(u)})});
+  ['1080p','default','720p'].forEach(function(r){push(playUrl(r,1))});
+  var wmUrls=urlList(play.url_list).filter(function(u){return /playwm/.test(u)})
+    .concat(urlList(video.download_addr&&video.download_addr.url_list))
+    .filter(function(u){return candidates.indexOf(u)<0});
+  return {
+    id:item.aweme_id||fallbackId, desc:(item.desc||'').trim(), author:(item.author&&item.author.nickname)||'',
+    durationMs:Number(video.duration||item.duration||0),
+    isGallery:Array.isArray(item.images)&&item.images.length>0,
+    gallery:(item.images||[]).map(function(im){return urlList(im.url_list)}).filter(function(a){return a.length>0}),
+    musicUrl:urlList(item.music&&item.music.play_url&&item.music.play_url.url_list)[0]||'',
+    videoUrls:candidates, wmUrls:wmUrls,
+  };
+}
+var SHARE_KINDS=['video','note','slides'];
+async function fetchInfo(target){
+  var kinds=[target.kind].concat(SHARE_KINDS.filter(function(k){return k!==target.kind}));
+  var lastErr=new Error('解析失败');
+  for(var i=0;i<kinds.length;i++){
+    try{
+      var r=await http('https://www.iesdouyin.com/share/'+kinds[i]+'/'+target.id+'/',{'User-Agent':MOBILE_UA,Cookie:ttwid(),Referer:'https://www.douyin.com/'});
+      if(r.status!==200)throw new Error('分享页 HTTP '+r.status);
+      var list=deepFindItemList(extractRouterData(r.body));
+      if(list)return normalizeItem(list[0],target.id);
+      lastErr=new Error('分享页未返回作品数据（可能已删除或受限）');
+    }catch(e){lastErr=e;}
+  }
+  throw lastErr;
+}
+async function fetchDetail(id){
+  var ms=fakeMsToken();
+  var qs='device_platform=webapp&aid=6383&channel=channel_pc_web&aweme_id='+id+'&pc_client_type=1&support_h265=1&support_dash=1&version_code=170400&version_name=17.4.0&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=126.0.0.0&browser_online=true&engine_name=Blink&engine_version=126.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=10&effective_type=4g&round_trip_time=50&msToken='+ms;
+  var bogus=makeABogus(qs, PAGE_UA); // utils.js 全局函数
+  var r=await http('https://www.douyin.com/aweme/v1/web/aweme/detail/?'+qs+'&a_bogus='+encodeURIComponent(bogus),
+    {'User-Agent':PAGE_UA,Cookie:(ttwid()?ttwid()+'; ':'')+'msToken='+ms,Referer:'https://www.douyin.com/'});
+  if(r.status!==200)throw new Error('详情接口 HTTP '+r.status);
+  var data=JSON.parse(r.body);
+  if(data.status_code&&data.status_code!==0)throw new Error('详情接口错误 status_code='+data.status_code);
+  var item=data.aweme_detail||(data.item_list&&data.item_list[0]);
+  if(!item)throw new Error('详情接口未返回作品数据');
+  return normalizeItem(item,id);
+}
+function sanitize(s,max){max=max||40;var c=String(s).replace(/[\\/:*?"<>|\r\n\t]+/g,' ').replace(/\s+/g,' ').trim();return c.slice(0,max).trim()||'douyin'}
+function fmtDur(ms){var s=Math.round(ms/1000);return ('0'+Math.floor(s/60)).slice(-2)+':'+('0'+(s%60)).slice(-2)}
+
+/* ---------- 任务队列（串行） ---------- */
+var queue=[],pumping=false;
+function enqueue(job){queue.push(job);render();pump()}
+async function pump(){
+  if(pumping)return;pumping=true;
+  while(queue.length){
+    var job=queue.shift();await runJob(job);render();
+  }
+  pumping=false;
+}
+async function runJob(job){
+  try{
+    job.status='resolving';render();
+    var target=await resolveShare(job.url);
+    var info;
+    try{ info=await fetchInfo(target); }
+    catch(e){ info=await fetchDetail(target.id); }
+    job.type=info.isGallery?'图集':'视频';job.author=info.author;job.desc=info.desc.slice(0,60);
+    if(info.isGallery)job.filesTotal=info.gallery.length;else job.filesTotal=1;
+    job.status='downloading';render();
+
+    var base=sanitize(info.id+'_'+info.desc,80);
+    function headers(){return {'User-Agent':MOBILE_UA,Referer:'https://www.douyin.com/',Cookie:ttwid()}}
+    async function grab(urls,name,onP){
+      var lastErr=null;
+      for(var i=0;i<urls.length;i++){
+        var res=await download(urls[i],headers(),name,function(d,t){onP(d,t)});
+        if(res.ok)return res;
+        lastErr=new Error(res.error||'下载失败');
+      }
+      throw lastErr||new Error('没有可用地址');
+    }
+    var warn='';
+    if(info.isGallery){
+      job.filesDone=0;
+      for(var g=0;g<info.gallery.length;g++){
+        job.received=0;job.total=0;render();
+        var name=base+'_'+('0'+(g+1)).slice(-2)+'.jpg';
+        var r=await grab(info.gallery[g],name,function(d,t){job.received=d;job.total=t;render()});
+        job.filesDone++;
+        if(r.name)job.saved=job.saved||[];job.saved.push(r.name);
+      }
+      if($('music').checked&&info.musicUrl){
+        var mr=await grab([info.musicUrl],base+'_music.m4a',function(d,t){job.received=d;job.total=t;render()});
+        if(mr.name)job.saved.push(mr.name);
+      }
+    }else{
+      job.received=0;job.total=0;render();
+      var name=base+'.mp4';
+      var vr;
+      try{ vr=await grab(info.videoUrls,name,function(d,t){job.received=d;job.total=t;render()}); }
+      catch(e){
+        if(info.wmUrls.length){
+          warn='无水印源不可用，已改用带水印源';job.warn=warn;render();
+          vr=await grab(info.wmUrls,name,function(d,t){job.received=d;job.total=t;render()});
+        } else throw e;
+      }
+      job.saved=[vr.name];
+    }
+    job.status='done';job.warn=warn;
+  }catch(e){
+    job.status='error';job.error=String(e.message||e).slice(0,120);
+  }
+  render();
+}
+
+/* ---------- 渲染 ---------- */
+var ST={queued:'排队中',resolving:'解析中',downloading:'下载中',done:'完成',error:'失败'};
+var jobs=[];
+function render(){
+  $('jobs').innerHTML=jobs.map(function(j){
+    var h='<div class="job st-'+j.status+'"><div class="jt"><span class="st">'+esc(ST[j.status]||j.status)+'</span>';
+    if(j.type)h+='<span class="tag">'+esc(j.type)+'</span>';
+    if(j.author)h+='<b>'+esc(j.author)+'</b>';
+    h+='</div>';
+    if(j.desc)h+='<div class="jd">'+esc(j.desc)+'</div>';
+    if(j.status==='downloading'){
+      if(j.filesTotal>1){
+        var pct=j.filesTotal?Math.round(j.filesDone/j.filesTotal*100):0;
+        h+='<div class="bar"><i style="width:'+pct+'%"></i></div><small>'+j.filesDone+' / '+j.filesTotal+' 张'+(j.total?'，当前 '+fmtMB(j.received)+' / '+fmtMB(j.total):'')+'</small>';
+      }else if(j.total>0){
+        h+='<div class="bar"><i style="width:'+Math.round(j.received/j.total*100)+'%"></i></div><small>'+fmtMB(j.received)+' / '+fmtMB(j.total)+'</small>';
+      }else h+='<small>已下载 '+fmtMB(j.received)+'</small>';
+    }
+    if(j.warn)h+='<div class="jw">⚠ '+esc(j.warn)+'</div>';
+    if(j.status==='done')h+='<small>已保存到 手机下载/douyin-dl/'+esc((j.saved&&j.saved[0])||'')+'</small>';
+    if(j.status==='error')h+='<div class="je">'+esc(j.error)+'</div>';
+    return h+'</div>';
+  }).join('');
+}
+$('go').onclick=function(){
+  $('err').textContent='';
+  var text=$('text').value;
+  var urls=extractUrls(text).slice(0,20);
+  if(!urls.length){$('err').textContent='未在输入中找到抖音链接';return}
+  $('text').value='';
+  urls.forEach(function(u){
+    var job={url:u,status:'queued',type:'',author:'',desc:'',filesDone:0,filesTotal:0,received:0,total:0};
+    jobs.unshift(job);enqueue(job);
+  });
+  render();
+};
+window.setShareText=function(t){ $('text').value=t||''; };
+render();
+</script></body></html>
