@@ -11,6 +11,10 @@ BT="$SDK/build-tools/34.0.0"
 PLAT="$SDK/platforms/android-34/android.jar"
 OUT="$ROOT/build"
 
+# 版本号唯一来源是根目录 VERSION（build.mjs sync 负责同步进 Manifest）
+VER="$(tr -d ' \r\n' < "$ROOT/../VERSION")"
+node "$ROOT/../build.mjs" sync
+
 JDK="$(ls -d /c/Program\ Files/Eclipse\ Adoptium/jdk-17* 2>/dev/null | head -1 || true)"
 [ -z "$JDK" ] && JDK="$(ls -d "$LOCALAPPDATA/Programs/Eclipse Adoptium/jdk-17"* 2>/dev/null | head -1)"
 [ -z "$JDK" ] && { echo "未找到 JDK 17"; exit 1; }
@@ -49,8 +53,8 @@ if [ ! -f "$ROOT/debug.keystore" ]; then
 fi
 "$BT/apksigner.bat" sign --ks "$ROOT/debug.keystore" \
   --ks-pass pass:android --key-pass pass:android \
-  --out "$ROOT/douyin-dl-1.1.0.apk" "$OUT/app-aligned.apk"
+  --out "$ROOT/douyin-dl-$VER.apk" "$OUT/app-aligned.apk"
 
 echo "[6/6] 校验"
-"$BT/apksigner.bat" verify "$ROOT/douyin-dl-1.1.0.apk"
-echo "✓ APK: $ROOT/douyin-dl-1.1.0.apk ($(stat -c %s "$ROOT/douyin-dl-1.1.0.apk") bytes)"
+"$BT/apksigner.bat" verify "$ROOT/douyin-dl-$VER.apk"
+echo "✓ APK: $ROOT/douyin-dl-$VER.apk ($(stat -c %s "$ROOT/douyin-dl-$VER.apk") bytes)"
