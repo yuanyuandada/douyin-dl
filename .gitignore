@@ -1,0 +1,6 @@
+node_modules/
+dist/
+sea-config.json
+downloads/
+*.part
+installer-test/

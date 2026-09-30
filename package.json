@@ -1,0 +1,20 @@
+{
+  "name": "douyin-dl",
+  "version": "1.1.0",
+  "description": "抖音视频/图集去水印下载工具（零依赖 Node CLI）",
+  "type": "module",
+  "bin": {
+    "douyin-dl": "./cli.mjs"
+  },
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6"
+  }
+}
